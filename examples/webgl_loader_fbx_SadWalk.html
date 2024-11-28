@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <title>three.js webgl - Modelo con Control de Audio</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+    <link type="text/css" rel="stylesheet" href="main.css">
+  </head>
+  <body>
+    <div id="info">
+      <a href="https://threejs.org" target="_blank" rel="noopener">three.js</a> - Modelo FBX<br />
+      Character and animation from <a href="https://www.mixamo.com/" target="_blank" rel="noopener">Mixamo</a>
+    </div>
+
+    <div id="skipContainer">
+      <button id="skipButton">Adelantar a Minuto 1:00</button>
+    </div>
+
+    <div id="controls">
+      <button id="pausePlayButton">Pausar</button>
+      <label>
+        Volumen:
+        <input id="volumeControl" type="range" min="0" max="1" step="0.01" value="0.7">
+      </label>
+      <button id="toggleRain">Activar - Desactivar Lluvia</button> <!-- Botón para la lluvia -->
+    </div>
+
+    <footer>
+      <h1>Escena 3D: Luigi Bailarin</h1>
+      <p><strong>Equipo:</strong> Cristian Alexis Ceron Nieves, Karen Garcia Angeles</p>
+      <p><strong>Números de Control:</strong> 21200680, 14200337</p>
+    </footer>
+
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "../build/three.module.js",
+          "three/addons/": "./jsm/"
+        }
+      }
+    </script>
+
+    <script type="module">
+      import * as THREE from 'three';
+      import Stats from 'three/addons/libs/stats.module.js';
+      import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+      import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
+      import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
+      import { Audio, AudioListener, AudioLoader } from 'three';
+      
+      
+
+      let camera, scene, renderer, stats, mixer, object, sound;
+      const clock = new THREE.Clock();
+
+      // Cambiar el fbx
+      const params = { asset: 'Thriller PartLuigi' };
+
+      const manager = new THREE.LoadingManager();
+      const loader = new FBXLoader(manager);
+
+      let rain, rainGeometry, rainMaterial, rainParticles, rainActive = true; // Variables de lluvia
+
+      init();
+
+      function init() {
+        const container = document.createElement('div');
+        document.body.appendChild(container);
+
+        // Cámara
+        camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 1, 2000);
+        camera.position.set(100, 200, 300);
+      
+
+
+        // Variables globales para los controles de teclado
+const keys = { forward: false, backward: false, left: false, right: false };
+const characterSpeed = 50; // Velocidad de movimiento
+const characterRotationSpeed = Math.PI / 60; // Velocidad de rotación
+
+// Controlar el teclado
+function handleKeyDown(event) {
+  switch (event.key) {
+    case 'ArrowUp': // Mover hacia adelante
+    case 'w':
+      keys.forward = true;
+      break;
+    case 'ArrowDown': // Mover hacia atrás
+    case 's':
+      keys.backward = true;
+      break;
+    case 'ArrowLeft': // Rotar hacia la izquierda
+    case 'a':
+      keys.left = true;
+      break;
+    case 'ArrowRight': // Rotar hacia la derecha
+    case 'd':
+      keys.right = true;
+      break;
+  }
+}
+
+function handleKeyUp(event) {
+  switch (event.key) {
+    case 'ArrowUp':
+    case 'w':
+      keys.forward = false;
+      break;
+    case 'ArrowDown':
+    case 's':
+      keys.backward = false;
+      break;
+    case 'ArrowLeft':
+    case 'a':
+      keys.left = false;
+      break;
+    case 'ArrowRight':
+    case 'd':
+      keys.right = false;
+      break;
+  }
+}
+
+// Asignar los eventos al navegador
+window.addEventListener('keydown', handleKeyDown);
+window.addEventListener('keyup', handleKeyUp);
+
+// Función para actualizar la posición y rotación del personaje
+function updateCharacter(delta) {
+  if (!object) return; // Asegurarnos de que el modelo está cargado
+
+  // Rotación del personaje
+  if (keys.left) object.rotation.y += characterRotationSpeed;
+  if (keys.right) object.rotation.y -= characterRotationSpeed;
+
+  // Movimiento hacia adelante y atrás
+  const direction = new THREE.Vector3();
+  if (keys.forward) {
+    direction.z = -5; // Mover hacia adelante en el eje Z negativo
+  }
+  if (keys.backward) {
+    direction.z = 5; // Mover hacia atrás en el eje Z positivo
+  }
+
+  // Convertir la dirección a coordenadas globales según la rotación del personaje
+  direction.applyQuaternion(object.quaternion);
+
+  // Escalar la dirección según la velocidad y el tiempo delta
+  direction.multiplyScalar(characterSpeed * delta);
+
+  // Actualizar la posición del personaje
+  object.position.add(direction);
+}
+
+// Modificar la función animate para incluir el movimiento del personaje
+function animate() {
+  const delta = clock.getDelta();
+  if (mixer) mixer.update(delta);
+
+  // Actualizar el movimiento del personaje
+  updateCharacter(delta);
+
+  renderer.render(scene, camera);
+  stats.update();
+}
+
+
+        // Escena
+        scene = new THREE.Scene();
+
+        // Fondo HDR
+        const rgbeLoader = new RGBELoader();
+        rgbeLoader.load('models/rgbe/autumn_hockey_4k.hdr', function (texture) {
+          texture.mapping = THREE.EquirectangularReflectionMapping;
+          scene.background = texture;
+          scene.environment = texture;
+
+          // Ajusta la intensidad del HDR
+          scene.environment.intensity = 1.5;
+        });
+
+        // Agregar iluminación (sol, luna, poste de luz)
+        addLighting();
+
+
+        // Música de fondo
+        const listener = new AudioListener();
+        camera.add(listener);
+
+        sound = new Audio(listener);
+        const audioLoader = new AudioLoader();
+        audioLoader.load('models/rgbe/MusicLuigi.mp3', function (buffer) {
+          console.log("Audio cargado exitosamente");
+          sound.setBuffer(buffer);
+          sound.setLoop(true);
+          sound.setVolume(0.7);
+          sound.play();
+        });
+
+        // Botón para adelantar la canción
+        document.getElementById('skipButton').addEventListener('click', () => skipToTime(60));
+
+        // Pausar/Reanudar Música
+        document.getElementById('pausePlayButton').addEventListener('click', togglePlayPause);
+
+        // Control de Volumen
+        document.getElementById('volumeControl').addEventListener('input', (event) => {
+          const volume = event.target.value;
+          sound.setVolume(volume);
+        });
+
+        // Cargar modelo FBX
+        loadAsset(params.asset);
+
+         // Crear lluvia
+         createRain(); // Llamamos la función para crear la lluvia
+
+        // Renderer
+        renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        container.appendChild(renderer.domElement);
+        
+
+        // Controles de órbita
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.target.set(0, 100, 0);
+        controls.update();
+
+        // Stats
+        stats = new Stats();
+        container.appendChild(stats.dom);
+
+        // Eventos
+        window.addEventListener('resize', onWindowResize);
+        document.getElementById('toggleRain').addEventListener('click', toggleRain); // Agregar el evento para el botón de lluvia
+
+        // Render loop
+        renderer.setAnimationLoop(animate);
+      }
+
+      function loadAsset(asset) {
+        loader.load('models/fbx/' + asset + '.fbx', function (group) {
+          if (object) {
+            object.traverse(child => {
+              if (child.material) {
+                const materials = Array.isArray(child.material) ? child.material : [child.material];
+                materials.forEach(material => material.dispose());
+              }
+              if (child.geometry) child.geometry.dispose();
+            });
+            scene.remove(object);
+          }
+
+          object = group;
+
+          if (object.animations && object.animations.length) {
+            mixer = new THREE.AnimationMixer(object);
+            const action = mixer.clipAction(object.animations[0]);
+            action.play();
+          } else {
+            mixer = null;
+          }
+
+          object.traverse(function (child) {
+            if (child.isMesh) {
+              child.castShadow = true;
+              child.receiveShadow = true;
+            }
+          });
+
+          scene.add(object);
+        });
+      }
+
+      function skipToTime(seconds) {
+        if (sound && sound.isPlaying) {
+          sound.stop(); // Detiene el audio actual
+        }
+        sound.offset = seconds; // Establece el tiempo de inicio
+        sound.play(); // Reproduce desde el nuevo tiempo
+        console.log(`Canción adelantada a ${seconds} segundos.`);
+      }
+
+      function togglePlayPause() {
+        if (sound.isPlaying) {
+          sound.pause();
+          document.getElementById('pausePlayButton').innerText = "Reanudar";
+        } else {
+          sound.play();
+          document.getElementById('pausePlayButton').innerText = "Pausar";
+        }
+      }
+
+      function onWindowResize() {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+      }
+
+      function animate() {
+        const delta = clock.getDelta();
+        if (mixer) mixer.update(delta);
+
+        // Movimiento de la lluvia
+        if (rainActive) {
+          const positions = rainGeometry.attributes.position.array;
+          for (let i = 1; i < positions.length; i += 3) {
+            positions[i] -= 10 * delta; // Caída de las gotas
+            if (positions[i] < 0) positions[i] = 500; // Resetear gotas al alcanzar el suelo
+          }
+          rainGeometry.attributes.position.needsUpdate = true;
+        }
+
+        renderer.render(scene, camera);
+        stats.update();
+      }
+
+      // Crear lluvia
+      function createRain() {
+        rainGeometry = new THREE.BufferGeometry();
+        const rainCount = 10000;
+        const positions = new Float32Array(rainCount * 3);
+
+        for (let i = 0; i < rainCount; i++) {
+          positions[i * 3] = Math.random() * 2000 - 1000; // Posición X
+          positions[i * 3 + 1] = Math.random() * 1000; // Posición Y
+          positions[i * 3 + 2] = Math.random() * 2000 - 1000; // Posición Z
+        }
+
+        rainGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+
+        rainMaterial = new THREE.PointsMaterial({
+          color: 0xaaaaaa,
+          size: 5,
+          transparent: true,
+          opacity: 1.7
+        });
+
+        rainParticles = new THREE.Points(rainGeometry, rainMaterial);
+        scene.add(rainParticles);
+      }
+
+      // Función para activar/desactivar la lluvia
+      function toggleRain() {
+        rainActive = !rainActive;
+        rainParticles.visible = rainActive;
+      
+      }
+
+      // Función para agregar iluminación (sol, luna, poste de luz)
+      function addLighting() {
+        // Luz direccional (sol)
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 2.5); // Blanco y de intensidad 1
+        directionalLight.position.set(100, 200, 100); // Coloca la luz arriba y en ángulo
+        directionalLight.castShadow = true; // Habilita sombras
+        scene.add(directionalLight);
+
+        // Luz ambiental (luna)
+        const ambientLight = new THREE.AmbientLight(0x404040, 0.5); // Luz ambiental suave
+        scene.add(ambientLight);
+
+        // Luz puntual (poste de luz)
+        const pointLight = new THREE.PointLight(0xffff00, 2, 100); // Luz amarilla (como un poste de luz)
+        pointLight.position.set(0, 50, 0); // Coloca la luz en el suelo
+        pointLight.castShadow = true; // Habilita sombras para la luz puntual
+        scene.add(pointLight);
+
+        // Añadir un objeto para la luz puntual (opcional, para visualizar el poste de luz)
+        //const lightHelper = new THREE.PointLightHelper(pointLight, 5); // Tamaño de la esfera del helper
+        //scene.add(lightHelper);
+      }
+    </script>
+  </body>
+</html>
+
+
+
+
+
